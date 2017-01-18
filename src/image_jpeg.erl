@@ -18,12 +18,13 @@
 -include("exif.hrl").
 
 -define(debug, false).
--include("dbg.hrl").
+%-include("dbg.hrl").
 -ifdef(debug).
 -define(dbg_emit_record(T,R), emit_record(R, record_info(fields, T))).
 -else.
 -define(dbg_emit_record(T,R), ok).
 -endif.
+-define(dbg(Fmt,Args), ok).
 
 
 %% JPeg bit stream
@@ -63,7 +64,7 @@ read_info(Fd) ->
     JFd = jfd(Fd),
     case jfd_read_bytes(JFd, 2) of
 	{JFd1, <<?M_MARK,?M_SOI>>} ->
-	    read_segments(JFd1, 
+	    read_segments(JFd1,
 			  #erl_image { type = ?MODULE,
 				     order = left_to_right
 				    });
@@ -127,7 +128,7 @@ read_segments(JFd0,Ei0) ->
 		    fun(Bin,Ei) ->
 			    process_sofn(Marker, Bin,Ei)
 		    end);
-	{JFd1,?M_DHT} -> 
+	{JFd1,?M_DHT} ->
 	    ?dbg("DHT\n", []),
 	    segment(JFd1,Ei0,
 		    fun(Bin,Ei) ->
@@ -147,11 +148,11 @@ read_segments(JFd0,Ei0) ->
 			    ?dbg("DRI Interval=~w\n", [Interval]),
 			    erl_img:set_attribute(Ei, dri,Interval)
 		    end);
-	{_JFd1, eof} -> 
+	{_JFd1, eof} ->
 	    io:format("Warning: EOF found before EOI\n"),
 	    {ok,Ei0};
 
-	{JFd1,?M_SOS} -> 
+	{JFd1,?M_SOS} ->
 	    ?dbg("SOS\n",[]),
 	    case jfd_read_bytes(JFd1,2) of
 		{JFd2,<<Len:16>>} ->
@@ -202,7 +203,7 @@ component_vh(Comps, IMG) ->
     component_vh(Comps, IMG, 0, 0).
 
 component_vh([{Format,_DC,_AC}|Cs], IMG, H, V) ->
-    io:format("component_vh: ~p\n", [{component,Format}]),
+    ?dbg("component_vh: ~p\n", [{component,Format}]),
     {_Q,H0,V0} = erl_img:attribute(IMG, {component,Format}, undefined),
     component_vh(Cs, IMG, max(H,H0), max(V,V0));
 component_vh([], _IMG, H, V) ->
@@ -219,7 +220,7 @@ component_vh([], _IMG, H, V) ->
 	  qt       %% Quantization table
 	 }).
 
-%% sos data 
+%% sos data
 -record(sos,
 	{
 	  height,  %% height of image
@@ -259,7 +260,7 @@ init_sos(<<N,Bin/binary>>, Ei) ->
 	       def = map(fun({Format,DCt,ACt}) ->
 				 DCD = erl_img:attribute(Ei,{dht,0,DCt},undefined),
 				 ACD = erl_img:attribute(Ei, {dht,1,ACt},undefined),
-				 {Q,H1,V1} = 
+				 {Q,H1,V1} =
 				     erl_img:attribute(Ei, {component,Format},
 						  undefined),
 				 QT = erl_img:attribute(Ei, {dqt,Q}, undefined),
@@ -276,12 +277,12 @@ init_sos(<<N,Bin/binary>>, Ei) ->
 	      },
     ?dbg("SOS=",[]), ?dbg_emit_record(sos, SOS),
     SOS.
-    
-    
+
+
 read_sos(JFd, SOS, Ei) ->
     Dcs0 = lists:duplicate(length(SOS#sos.def), 0),
     {JFd1,Data,_Dcs1,_N} = read_mcu_h(JFd,SOS#sos.h,Dcs0,0,SOS,[]),
-    io:format("Convert to RGB\n",[]),
+    ?dbg("Convert to RGB\n",[]),
     Width = Ei#erl_image.width,
     Height = Ei#erl_image.height,
     Format = r8g8b8,
@@ -303,7 +304,7 @@ read_mcu_h(JFd,H,Dcs,N,SOS,MCULs) ->
 read_mcu_w(JFd,0,Dcs0,N,_SOS,MCUs) ->
     {JFd,reverse(MCUs),Dcs0,N};
 read_mcu_w(JFd,W,Dcs0,N,SOS,MCUs) ->
-    {JFd0,Dcs1} = read_rst(JFd, N, Dcs0, SOS), 
+    {JFd0,Dcs1} = read_rst(JFd, N, Dcs0, SOS),
     {JFd1,MCU,Dcs2} = read_mcu(JFd0,SOS#sos.def,Dcs1,[],[]),
     read_mcu_w(JFd1,W-1,Dcs2,N+1,SOS,[MCU|MCUs]).
 
@@ -326,12 +327,12 @@ read_block(JFd,I,C, Dc, Acc) ->
     read_block(JFd1,I-1,C,hd(B0),[B3|Acc]).
 
 
-    
+
 read_rst(JFd, 0, Dcs, _SOS) ->
-    {JFd,Dcs};    
+    {JFd,Dcs};
 read_rst(JFd, N, Dcs, SOS) ->
     case SOS#sos.dri of
-	0 -> 
+	0 ->
 	    {JFd,Dcs};
 	DRI ->
 	    I = N rem DRI,
@@ -378,7 +379,7 @@ sync1(JFd, RSTi) ->
 cvt_rgb_h([MCUw|MCULs], Ri0, SOS, Pixels) ->
     N = SOS#sos.hor*8,
     Pixels1 = forfold(Ri0+N-1,Ri0-1,-1,
-		      fun(Ri,Acc) -> [{Ri,<<>>}|Acc] end, 
+		      fun(Ri,Acc) -> [{Ri,<<>>}|Acc] end,
 		      Pixels),
     Pixels2  = cvt_rgb_w(MCUw, SOS, Pixels1),
     cvt_rgb_h(MCULs, Ri0+N, SOS, Pixels2);
@@ -390,22 +391,22 @@ cvt_rgb_w([MCU|MCUs], SOS, Pixels) ->
     cvt_rgb_w(MCUs, SOS, Pixels1);
 cvt_rgb_w([], _SOS, Pixels) ->
     Pixels.
-    
+
 
 %% 1:1:1
-cvt_mcu([[Y],[Cb],[Cr]], 
+cvt_mcu([[Y],[Cb],[Cr]],
 	[#comp{format=y,n=1},#comp{format=cb,n=1},#comp{format=cr,n=1}],
 	Pixels) ->
     cvt_ycbcr(Y,Cb,Cr,Pixels);
-cvt_mcu([[Y1,Y2],[Cb],[Cr]], 
-	[#comp{format=y,n=2,v=2},#comp{format=cb,n=1},#comp{format=cr,n=1}], 
+cvt_mcu([[Y1,Y2],[Cb],[Cr]],
+	[#comp{format=y,n=2,v=2},#comp{format=cb,n=1},#comp{format=cr,n=1}],
 	Pixels) ->
     {Cb1,Cb2} = up_sample_v(Cb),
     {Cr1,Cr2} = up_sample_v(Cr),
     Pixels1 = cvt_ycbcr(Y1, Cb1, Cr1, Pixels),
     cvt_ycbcr(Y2, Cb2, Cr2, Pixels1);
-cvt_mcu([[Y1,Y2],[Cb],[Cr]], 
-	[#comp{format=y,n=2,h=2},#comp{format=cb,n=1},#comp{format=cr,n=1}], 
+cvt_mcu([[Y1,Y2],[Cb],[Cr]],
+	[#comp{format=y,n=2,h=2},#comp{format=cb,n=1},#comp{format=cr,n=1}],
 	Pixels) ->
     {Cb1,Cb2} = up_sample_h(Cb),
     {Cr1,Cr2} = up_sample_h(Cr),
@@ -414,7 +415,7 @@ cvt_mcu([[Y1,Y2],[Cb],[Cr]],
     Pixels3 = cvt_ycbcr(Y2, Cb2, Cr2, Pixels2),
     [R0,R1,R2,R3,R4,R5,R6,R7|Pixels3];
 %% 2:1:1
-cvt_mcu([[Y1,Y2,Y3,Y4],[Cb],[Cr]], 
+cvt_mcu([[Y1,Y2,Y3,Y4],[Cb],[Cr]],
 	[#comp{format=y,n=4},#comp{format=cb,n=1},#comp{format=cr,n=1}],
 	Pixels) ->
     {Cb1,Cb2,Cb3,Cb4} = up_sample_vh(Cb),
@@ -424,7 +425,7 @@ cvt_mcu([[Y1,Y2,Y3,Y4],[Cb],[Cr]],
     [R0,R1,R2,R3,R4,R5,R6,R7|Pixels3] = Pixels2,
     Pixels4 = cvt_ycbcr(Y3, Cb3, Cr3, Pixels3),
     Pixels5 = cvt_ycbcr(Y4, Cb4, Cr4, Pixels4),
-    [R0,R1,R2,R3,R4,R5,R6,R7|Pixels5].    
+    [R0,R1,R2,R3,R4,R5,R6,R7|Pixels5].
 
 %% up-sample 8x8 verticalx2 => 16x8
 %% input is 8x8 and output is two 8x8 one above the other
@@ -451,7 +452,7 @@ up_sample_h(Xs) ->
 
 up_sample_h([[A1,A2,A3,A4,B1,B2,B3,B4]|Xs], As, Bs) ->
     up_sample_h(Xs,
-		[[A1,A1,A2,A2,A3,A3,A4,A4]|As], 
+		[[A1,A1,A2,A2,A3,A3,A4,A4]|As],
 		[[B1,B1,B2,B2,B3,B3,B4,B4]|Bs]);
 up_sample_h([], As, Bs) ->
     {reverse(As), reverse(Bs)}.
@@ -516,7 +517,7 @@ jfd_skip2(JFd) ->
 	Error ->
 	    Error
     end.
-    
+
 
 %% Run huffman decode on one the bit buffer
 jfd_decode_bits(JFd, H) ->
@@ -532,7 +533,7 @@ jfd_decode_bits_(<<1:1,Bits/bits>>, {_,R}, Ds, JFd) ->
 jfd_decode_bits_(<<>>, H, Ds, JFd) when is_tuple(H) ->
     JFd1 = jfd_load_bits(JFd#jfd{bits=(<<>>)},8),
     if bit_size(JFd1#jfd.bits) == 0 ->
-	    io:format("~s => (<<>>)\n", [reverse(Ds)]),
+	    ?dbg("~s => (<<>>)\n", [reverse(Ds)]),
 	    erlang:error({error, not_a_code});
        true ->
 	    jfd_decode_bits_(JFd1#jfd.bits, H, Ds, JFd1)
@@ -541,7 +542,7 @@ jfd_decode_bits_(Bits, Code, _Ds, JFd) when is_integer(Code) ->
     %% io:format("~s => ~w\n", [reverse(_Ds), Code]),
     {JFd#jfd {bits=Bits }, Code};
 jfd_decode_bits_(Bits, Code, Ds, _JFd) ->
-    io:format("~s => ~w (~w)\n", [reverse(Ds), Code, Bits]),
+    ?dbg("~s => ~w (~w)\n", [reverse(Ds), Code, Bits]),
     erlang:error({error, not_a_code}).
 
 %% Byte align the the bit stream (ditch the bits)
@@ -549,7 +550,7 @@ jfd_byte_align(JFd) ->
     ?dbg("byte align bits=~w\n", [bit_size(JFd#jfd.bits)]),
     JFd#jfd { bits=(<<>>) }.
 
-%% align the bit stream and read N bytes 
+%% align the bit stream and read N bytes
 %% return {JFd', Bytes} | {JFd', eof}
 jfd_read_bytes(JFd, N) ->
     JFd1 = jfd_byte_align(JFd),
@@ -627,12 +628,12 @@ jfd_load_bits_(JFd, Bits, Bytes, N) ->
 		    end
 	    end
     end.
-	
+
 
 %% decode all DHT tables
 decode_dht(<<_:3,AC:1,Ti:4,Bin/binary>>, IMG) ->
     {DHT,Bin1} = epx_huffman:decode_dht(Bin),
-    if AC==0 -> 
+    if AC==0 ->
 	    ?dbg("DHT: DC table=~p\n", [Ti]);
        true ->
 	    ?dbg("DHT: AC table=~p\n", [Ti])
@@ -672,7 +673,7 @@ quantize([C|Cs], [Q|Qs]) ->
     [trunc((C / Q)+0.5) | quantize(Cs, Qs)];
 quantize([], []) ->
     [].
-    
+
 
 %%
 %% JPEG Block A[64] (or A[8][8])  encoded as:
@@ -739,7 +740,7 @@ decode_block_ac(JFd, I, Acs, C) when I > 0 ->
     R = (V bsr 4) band 16#f,  %% run length
     if
 	S == 0 ->
-	    if 
+	    if
 		R == 0 ->
 		    decode_eob(JFd1, I, Acs);
 		R == 15 ->
@@ -785,11 +786,11 @@ process_sofn(_M,<<Depth:8,Height:16,Width:16,NComp:8,Bin/binary>>, IMG) ->
     process_sofn_component(NComp,Bin, IMG1).
 
 component_id(1) -> y;  %% lumincance
-component_id(2) -> cb; %% 
-component_id(3) -> cr; %% 
+component_id(2) -> cb; %%
+component_id(3) -> cr; %%
 component_id(4) -> i;  %%
 component_id(5) -> q.  %%
-    
+
 process_sofn_component(0, _Bin, IMG) ->
     IMG;
 process_sofn_component(I, <<ID:8,H:4,V:4,Q:8,Bin/binary>>,IMG) ->
@@ -797,39 +798,39 @@ process_sofn_component(I, <<ID:8,H:4,V:4,Q:8,Bin/binary>>,IMG) ->
     IMG1 = erl_img:set_attribute(IMG, {component,Format}, {Q,H,V}),
     ?dbg("component ~p q=~p, h=~p, v=~p\n", [Format,Q,H,V]),
     process_sofn_component(I-1, Bin, IMG1).
-    
+
 
 %% Maker OLYMP
 collect_olymp(_Fd, _T, St) ->
-    ?dbg("OLYMP(~s) ~4.16.0B ~p ~p\n", 
+    ?dbg("OLYMP(~s) ~4.16.0B ~p ~p\n",
 	 [_T#tiff_entry.ifd,_T#tiff_entry.tag,
 	  _T#tiff_entry.type, _T#tiff_entry.value]),
     St.
 
 %% Maker Nikon
 collect_nikon(_Fd, _T, St) ->
-    ?dbg("Nikon(~s) ~4.16.0B ~p ~p\n", 
+    ?dbg("Nikon(~s) ~4.16.0B ~p ~p\n",
 	[_T#tiff_entry.ifd,_T#tiff_entry.tag,
 	 _T#tiff_entry.type, _T#tiff_entry.value]),
     St.
 
 %% Maker FUJIFILM
 collect_fujifilm(_Fd, _T, St) ->
-    ?dbg("Fujifilm(~s) ~4.16.0B ~p ~p\n", 
+    ?dbg("Fujifilm(~s) ~4.16.0B ~p ~p\n",
 	 [_T#tiff_entry.ifd,_T#tiff_entry.tag,
 	  _T#tiff_entry.type,_T#tiff_entry.value]),
     St.
 
 %% Maker Sony DSC
 collect_sony(_Fd, _T, St) ->
-    ?dbg("Sony(~s) ~4.16.0B ~p ~p\n", 
+    ?dbg("Sony(~s) ~4.16.0B ~p ~p\n",
 	 [_T#tiff_entry.ifd,_T#tiff_entry.tag,
 	  _T#tiff_entry.type,_T#tiff_entry.value]),
-    St.    
+    St.
 
 %% Maker other
 collect_other(_Fd, _T, St) ->
-    ?dbg("Maker(~s) ~4.16.0B ~p ~p\n", 
+    ?dbg("Maker(~s) ~4.16.0B ~p ~p\n",
 	 [_T#tiff_entry.ifd,_T#tiff_entry.tag,
 	  _T#tiff_entry.type,_T#tiff_entry.value]),
     St.
@@ -861,7 +862,7 @@ collect_maker_fixme(Fd, T, St) ->
 			     T#tiff_entry.endian,
 			     fun collect_sony/3, St);
 	<<"FUJIFILM",Offset:32/little>> ->
-	    image_tiff:scan_ifd_bin(MakerBin, 
+	    image_tiff:scan_ifd_bin(MakerBin,
 				 [$0,$:|T#tiff_entry.ifd],
 				 Offset, little,
 				 fun collect_fujifilm/3, St);
@@ -875,7 +876,7 @@ collect_maker_fixme(Fd, T, St) ->
 
 
 collect_exif(Fd, T, St) ->
-    ?dbg("EXIF(~s) ~p ~p ~p\n", 
+    ?dbg("EXIF(~s) ~p ~p ~p\n",
 	[T#tiff_entry.ifd,
 	 exif:decode_tag(T#tiff_entry.tag),
 	 T#tiff_entry.type, T#tiff_entry.value]),
@@ -906,7 +907,7 @@ collect_exif(Fd, T, St) ->
 %% Image info collector functions
 collect_tiff(Fd, T, St) ->
     Key = image_tiff:decode_tag(T#tiff_entry.tag),
-    ?dbg("TIFF(~s) ~p ~p ~p\n", 
+    ?dbg("TIFF(~s) ~p ~p ~p\n",
 	[T#tiff_entry.ifd,Key,T#tiff_entry.type, T#tiff_entry.value]),
     case T#tiff_entry.tag of
 	?ImageWidth ->
@@ -982,7 +983,7 @@ rzigzag([A0, A1, A8,A16, A9, A2, A3,A10,
 	 A29,A22,A15,A23,A30,A37,A44,A51,
 	 A58,A59,A52,A45,A38,A31,A39,A46,
 	 A53,A60,A61,A54,A47,A55,A62,A63]) ->
-    [[A0, A1, A2, A3, A4, A5, A6, A7], 
+    [[A0, A1, A2, A3, A4, A5, A6, A7],
      [A8, A9, A10,A11,A12,A13,A14,A15],
      [A16,A17,A18,A19,A20,A21,A22,A23],
      [A24,A25,A26,A27,A28,A29,A30,A31],
@@ -1002,7 +1003,7 @@ zigzag([[A0, A1, A5, A6,A14,A15,A27,A28],
 	[A20,A22,A33,A38,A46,A51,A55,A60],
 	[A21,A34,A37,A47,A50,A56,A59,A61],
 	[A35,A36,A48,A49,A57,A58,A62,A63]]) ->
-    [A0, A1, A2, A3, A4, A5, A6, A7, 
+    [A0, A1, A2, A3, A4, A5, A6, A7,
      A8, A9, A10,A11,A12,A13,A14,A15,
      A16,A17,A18,A19,A20,A21,A22,A23,
      A24,A25,A26,A27,A28,A29,A30,A31,
@@ -1010,7 +1011,7 @@ zigzag([[A0, A1, A5, A6,A14,A15,A27,A28],
      A40,A41,A42,A43,A44,A45,A46,A47,
      A48,A49,A50,A51,A52,A53,A54,A55,
      A56,A57,A58,A59,A60,A61,A62,A63].
-    
+
 
 
 
@@ -1022,7 +1023,7 @@ zigzag([[A0, A1, A5, A6,A14,A15,A27,A28],
 formap(N, Fun) ->
     formap(0, N, 1, Fun).
 
-formap(Start, Stop, Step, Fun) when 
+formap(Start, Stop, Step, Fun) when
   is_integer(Start),is_integer(Stop),is_integer(Step),
   is_function(Fun) ->
     if Step > 0, Start < Stop ->
@@ -1051,7 +1052,7 @@ formap_dec(_I,_N,_S,_Fun) ->
 forfold(N, Fun, Acc) ->
     forfold(0, N, 1, Fun, Acc).
 
-forfold(Start, Stop, Step, Fun, Acc) when 
+forfold(Start, Stop, Step, Fun, Acc) when
   is_integer(Start),is_integer(Stop),is_integer(Step),
   is_function(Fun) ->
     if Step > 0, Start < Stop ->
@@ -1078,15 +1079,15 @@ forfold_dec(_I,_N,_S,_Fun,Acc) ->
 %%
 
 %% print record
-emit_record(R, Fs) ->    
-    io:format("#~s {", [element(1, R)]),
+emit_record(R, Fs) ->
+    ?dbg("#~s {", [element(1, R)]),
     emit_fields(2, R, Fs),
-    io:format("}.\n", []).
+    ?dbg("}.\n", []).
 
 emit_fields(I, R, [F]) ->
-    io:format("  ~s = ~w\n", [F, element(I,R)]);
+    ?dbg("  ~s = ~w\n", [F, element(I,R)]);
 emit_fields(I, R, [F|Fs]) ->
-    io:format("  ~s = ~w,\n", [F, element(I,R)]),
+    ?dbg("  ~s = ~w,\n", [F, element(I,R)]),
     emit_fields(I+1, R, Fs);
 emit_fields(_I, _R, []) ->
     ok.
@@ -1099,16 +1100,16 @@ emit_8x8(DQT, Fmt) ->
     L1 = lists:map(fun(E) -> io_lib:format(Fmt, [E]) end, DQT),
     En = lists:max(lists:map(fun(F) -> iolist_size(F) end, L1)),
     Fmt2 = "~"++integer_to_list(En)++"s",
-    
-    io:format("[", []), emit_es(L1,Fmt2,0), io:format("]\n", []).
+
+    ?dbg("[", []), emit_es(L1,Fmt2,0), ?dbg("]\n", []).
 
 emit_es([E],Fmt,_) ->
-    io:format(Fmt, [E]);
+    ?dbg(Fmt, [E]);
 emit_es([E|Es],Fmt,I) when I > 0, I rem 8 == 0 ->
-    io:format("\n "++Fmt++",", [E]),
+    ?dbg("\n "++Fmt++",", [E]),
     emit_es(Es,Fmt,I+1);
 emit_es([E|Es],Fmt,I) ->
-    io:format(Fmt++",", [E]),
+    ?dbg(Fmt++",", [E]),
     emit_es(Es,Fmt,I+1).
 
 
@@ -1120,11 +1121,11 @@ emit_dht(DHT) ->
 emit_ht(x, _Ds) ->  %% not used
     ok;
 emit_ht(Code, Ds) when is_integer(Code) ->
-    io:format("<<2#~s:~w,Bs/bits>> -> ~w;\n", [reverse(Ds), length(Ds), Code]);
+    ?dbg("<<2#~s:~w,Bs/bits>> -> ~w;\n", [reverse(Ds), length(Ds), Code]);
 emit_ht({L,R}, Ds) ->
     emit_ht(L, [$0|Ds]),
     emit_ht(R, [$1|Ds]).
 
 %% print bits
 format_bits(Bits) ->
-    [Bit+$0 || <<Bit:1>> <= Bits]. 
+    [Bit+$0 || <<Bit:1>> <= Bits].
